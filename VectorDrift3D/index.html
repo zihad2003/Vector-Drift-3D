@@ -1,0 +1,641 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <title>Vector Drift 3D: Realistic Daylight City Simulator</title>
+    <style>
+        body { margin: 0; padding: 0; background: #000; color: #333; font-family: 'Inter', -apple-system, sans-serif; overflow: hidden; }
+        
+        #ui { position: absolute; top: 0; left: 0; width: 380px; height: 100vh; background: rgba(255, 255, 255, 0.85); border-right: 1px solid rgba(0, 0, 0, 0.1); padding: 30px; box-sizing: border-box; display: flex; flex-direction: column; gap: 24px; box-shadow: 10px 0 30px rgba(0,0,0,0.1); z-index: 10; backdrop-filter: blur(15px);}
+        h1 { margin: 0; font-size: 26px; font-weight: 800; letter-spacing: 1px; color: #1e293b; text-transform: uppercase; }
+        .subtitle { font-size: 13px; color: #64748b; margin-top: -20px; font-weight: 600; text-transform: uppercase; letter-spacing: 2px;}
+        
+        .panel { background: rgba(255,255,255,0.6); padding: 20px; border-radius: 12px; border: 1px solid rgba(0,0,0,0.08); transition: all 0.3s ease; box-shadow: 0 4px 6px -1px rgba(0, 0, 0, 0.05); }
+        .panel:hover { border-color: rgba(56, 189, 248, 0.4); }
+        .panel-title { font-size: 11px; text-transform: uppercase; color: #94a3b8; font-weight: 800; margin-bottom: 15px; letter-spacing: 1.5px; display: flex; align-items: center;}
+        .panel-title::after { content: ''; flex: 1; height: 1px; background: rgba(0,0,0,0.06); margin-left: 10px;}
+        
+        .stat-row { display: flex; justify-content: space-between; margin-bottom: 10px; font-family: 'SF Mono', Consolas, monospace; font-size: 14px;}
+        .stat-label { color: #64748b; }
+        .stat-value { color: #0f172a; font-weight: 700; }
+        
+        .stat-value.danger { color: #e11d48; }
+        .stat-value.safe { color: #059669; }
+        .stat-value.warn { color: #d97706; }
+        
+        button { background: #f1f5f9; color: #475569; border: 1px solid #cbd5e1; padding: 12px; border-radius: 6px; cursor: pointer; transition: all 0.2s cubic-bezier(0.4, 0, 0.2, 1); font-family: inherit; font-weight: 600; text-transform: uppercase; font-size: 12px; margin-bottom: 8px; width: 100%; letter-spacing: 0.5px;}
+        button:hover { background: #e2e8f0; color: #0f172a; border-color: #94a3b8; }
+        button.danger-btn { background: #fee2e2; color: #dc2626; border-color: #fca5a5; }
+        button.danger-btn:hover { background: #f87171; color: #fff; border-color: #f87171; }
+        button:active { transform: scale(0.97); }
+        
+        .btn-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; }
+        
+        #instructions { position: absolute; bottom: 30px; left: 410px; color: #1e293b; background: rgba(255, 255, 255, 0.9); padding: 20px 25px; border-radius: 12px; pointer-events: none; backdrop-filter: blur(10px); border: 1px solid rgba(0,0,0,0.1); box-shadow: 0 10px 30px rgba(0,0,0,0.1); max-width: 400px; line-height: 1.6; z-index: 10;}
+        #instructions strong { color: #0ea5e9; font-size: 14px; letter-spacing: 1px; display: block; margin-bottom: 5px;}
+        
+        #minimap-border { position: absolute; top: 25px; right: 25px; width: 250px; height: 250px; border: 4px solid #fff; border-radius: 8px; pointer-events: none; box-shadow: 0 10px 25px rgba(0,0,0,0.2); z-index: 10; overflow: hidden;}
+        #minimap-label { position: absolute; top: 0; left: 0; background: #fff; color: #0f172a; font-size: 10px; font-weight: bold; letter-spacing: 2px; padding: 4px 8px; border-bottom-right-radius: 8px;}
+
+        #nav-status { font-family: monospace; color: #059669; font-size: 11px; margin-top: 5px; font-weight: bold;}
+        #error-log { position: absolute; top: 10px; left: 400px; color: #fff; background: rgba(220,38,38,0.9); padding: 10px; font-family: monospace; font-size: 12px; z-index: 100; max-width: 500px; display: none; }
+    </style>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/three@0.128.0/examples/js/controls/OrbitControls.js"></script>
+</head>
+<body>
+    <div id="error-log"></div>
+    <div id="ui">
+        <h1>Vector Drift <span style="color:#0ea5e9">3D</span></h1>
+        <p class="subtitle">High-Fidelity Realism</p>
+        
+        <div class="panel">
+            <div class="panel-title">Live Telemetry</div>
+            <div class="stat-row"><span class="stat-label">Velocity</span><span id="tel-vel" class="stat-value">0.0 km/h</span></div>
+            <div class="stat-row"><span class="stat-label">Slip Angle</span><span id="tel-slip" class="stat-value">0.0°</span></div>
+            <div class="stat-row"><span class="stat-label">Lat G-Force</span><span id="tel-gforce" class="stat-value">0.00 G</span></div>
+        </div>
+
+        <div class="panel">
+            <div class="panel-title">Mission Control</div>
+            <div class="stat-row"><span class="stat-label">Requested Speed</span><span id="ctrl-speed" class="stat-value save">60 km/h</span></div>
+            <div class="btn-grid">
+                <button onclick="changeSpeed(20)" style="background: #d1fae5; color: #059669; border-color: #6ee7b7;">Speed Up (+20)</button>
+                <button onclick="changeSpeed(-20)">Slow Down (-20)</button>
+            </div>
+            <button onclick="setSpeed(0)" class="danger-btn" style="margin-top: 5px;">Emergency Brake</button>
+            <button onclick="window.toggleCameraMode()" style="margin-top: 10px; background: #e0f2fe; border-color: #bae6fd; color: #0284c7;" id="btn-cam">SWITCH TO ORBIT CAM</button>
+        </div>
+        
+        <div class="panel" style="flex: 1;">
+            <div class="panel-title">Intersection GPS Route Status</div>
+            <div id="nav-status">INITIALIZING AI NAV-MESH...</div>
+            <div class="stat-row" style="margin-top: 10px;"><span class="stat-label">Distance to TRGT</span><span id="wp-dist" class="stat-value">0 m</span></div>
+        </div>
+    </div>
+    
+    <div id="instructions">
+        <strong>REALISTIC 3D GRAPHICS DEPLOYED:</strong>
+        <span style="color: #475569;">• Procedural 4K Road Textures with yellow markings.<br>
+        • High-fidelity physical Daylight shadow rendering.<br>
+        • Concrete and glass skyscrapers act as perfect grid constraints.<br>
+        • Click any road block intersection to navigate!</span>
+    </div>
+
+    <div id="minimap-border"><div id="minimap-label">SATELLITE</div></div>
+
+    <script>
+        window.onerror = function(msg, url, lineNo, columnNo, error) {
+            let el = document.getElementById('error-log');
+            el.style.display = 'block';
+            el.innerHTML += `<br/>[ERROR] Line ${lineNo}: ${msg}`;
+            return false;
+        };
+
+        try {
+            // --- 3D ENGINE SETUP ---
+            const scene = new THREE.Scene();
+            scene.background = new THREE.Color(0x87ceeb); // Bright daylight blue
+            scene.fog = new THREE.Fog(0x87ceeb, 400, 2500); // Linear daylight fog
+
+            const camera = new THREE.PerspectiveCamera(60, window.innerWidth / window.innerHeight, 0.1, 4000);
+            camera.layers.enable(0); 
+
+            const mapAreaRadius = 500;
+            const miniCam = new THREE.OrthographicCamera(-mapAreaRadius, mapAreaRadius, mapAreaRadius, -mapAreaRadius, 1, 4000);
+            miniCam.position.y = 1000;
+            miniCam.lookAt(0, 0, 0);
+            miniCam.layers.enable(0); 
+            miniCam.layers.enable(1); 
+
+            const renderer = new THREE.WebGLRenderer({ antialias: true, powerPreference: "high-performance" });
+            renderer.setSize(window.innerWidth, window.innerHeight);
+            renderer.shadowMap.enabled = true;
+            renderer.shadowMap.type = THREE.PCFSoftShadowMap;
+            renderer.autoClear = false; 
+            document.body.appendChild(renderer.domElement);
+            renderer.domElement.style.position = 'absolute';
+            renderer.domElement.style.top = '0';
+            renderer.domElement.style.left = '0';
+            renderer.domElement.style.zIndex = '-1';
+
+            const controls = new THREE.OrbitControls(camera, renderer.domElement);
+            controls.enabled = false;
+            controls.enableDamping = true;
+            controls.maxPolarAngle = Math.PI / 2 - 0.05;
+
+            // --- REALISTIC LIGHTING ---
+            const hemiLight = new THREE.HemisphereLight(0xffffff, 0xc2b280, 0.55); // Sky color, Earth color
+            hemiLight.position.set(0, 500, 0);
+            scene.add(hemiLight);
+
+            const sunLight = new THREE.DirectionalLight(0xffffff, 0.95); // High intensity sun
+            sunLight.position.set(-600, 1000, -300); // Afternoon angle
+            sunLight.castShadow = true;
+            sunLight.shadow.mapSize.width = 4096;
+            sunLight.shadow.mapSize.height = 4096;
+            const sCamSize = 1200; // Large shadow cascade range
+            sunLight.shadow.camera.top = sCamSize;
+            sunLight.shadow.camera.bottom = -sCamSize;
+            sunLight.shadow.camera.left = -sCamSize;
+            sunLight.shadow.camera.right = sCamSize;
+            sunLight.shadow.bias = -0.0005; // Prevent jagged acne
+            scene.add(sunLight);
+
+            // --- CITY GENERATOR CONSTANTS ---
+            const BLOCK_SIZE = 120;
+            const ROAD_WIDTH = 40;
+            const CITY_SIZE = 40; // 40x40 blocks
+            const WORLD_SIZE = BLOCK_SIZE * CITY_SIZE; 
+            
+            // --- PROCEDURAL ROAD TEXTURE ---
+            function createRoadTexture() {
+                const size = 512;
+                const canvas = document.createElement('canvas');
+                canvas.width = size; canvas.height = size;
+                const ctx = canvas.getContext('2d');
+                
+                // Light grey sidewalk base
+                ctx.fillStyle = '#9ca3af';
+                ctx.fillRect(0,0,size,size);
+                
+                // Asphalt Roads cutting across the sidewalks
+                const rT = 40 * (512/120); // Scale ROAD_WIDTH to texture pixels
+                ctx.fillStyle = '#2c2e33'; 
+                ctx.fillRect(0, size/2 - rT/2, size, rT);
+                ctx.fillRect(size/2 - rT/2, 0, rT, size);
+                
+                // White dividing lanes
+                ctx.strokeStyle = '#e5e7eb';
+                ctx.lineWidth = 4;
+                ctx.setLineDash([30, 30]);
+                ctx.beginPath(); 
+                ctx.moveTo(0, size/2 - rT/4); ctx.lineTo(size, size/2 - rT/4);
+                ctx.moveTo(0, size/2 + rT/4); ctx.lineTo(size, size/2 + rT/4);
+                ctx.moveTo(size/2 - rT/4, 0); ctx.lineTo(size/2 - rT/4, size);
+                ctx.moveTo(size/2 + rT/4, 0); ctx.lineTo(size/2 + rT/4, size);
+                ctx.stroke();
+                
+                // Double yellow center lines
+                ctx.strokeStyle = '#fbbf24';
+                ctx.lineWidth = 6;
+                ctx.setLineDash([]);
+                ctx.beginPath();
+                ctx.moveTo(0, size/2 - 3); ctx.lineTo(size, size/2 - 3);
+                ctx.moveTo(0, size/2 + 3); ctx.lineTo(size, size/2 + 3);
+                ctx.moveTo(size/2 - 3, 0); ctx.lineTo(size/2 - 3, size);
+                ctx.moveTo(size/2 + 3, 0); ctx.lineTo(size/2 + 3, size);
+                ctx.stroke();
+                
+                // Clear the immediate intersection to prevent ugly overlap dashes
+                ctx.fillStyle = '#2c2e33';
+                ctx.fillRect(size/2 - rT/2 + 10, size/2 - rT/2 + 10, rT - 20, rT - 20);
+                
+                const tex = new THREE.CanvasTexture(canvas);
+                tex.wrapS = THREE.RepeatWrapping;
+                tex.wrapT = THREE.RepeatWrapping;
+                tex.anisotropy = renderer.capabilities.getMaxAnisotropy(); // Critical for crisp roads into horizon
+                return tex;
+            }
+
+            const roadTex = createRoadTexture();
+            roadTex.repeat.set(CITY_SIZE, CITY_SIZE);
+            roadTex.offset.set(0.5, 0.5); // Perfectly maps the UV center to the architectural World Intersections!
+
+            // Physical Ground
+            const groundGeo = new THREE.PlaneGeometry(WORLD_SIZE, WORLD_SIZE);
+            const groundMat = new THREE.MeshStandardMaterial({ map: roadTex, roughness: 0.85, metalness: 0.1 });
+            const ground = new THREE.Mesh(groundGeo, groundMat);
+            ground.rotation.x = -Math.PI / 2;
+            ground.receiveShadow = true;
+            scene.add(ground);
+
+            // Procedural Skyscrapers - High Realism Materials
+            const bConcrete = new THREE.MeshStandardMaterial({color: 0xd1d5db, roughness: 0.9, metalness: 0.2}); // Light concrete
+            const bPlaster = new THREE.MeshStandardMaterial({color: 0xc2b280, roughness: 1.0, metalness: 0.1}); // Tan stucco
+            const bSlate = new THREE.MeshStandardMaterial({color: 0x475569, roughness: 0.6, metalness: 0.3}); // Dark slate
+            const bGlass = new THREE.MeshStandardMaterial({color: 0x60a5fa, metalness: 1.0, roughness: 0.1}); // Extremely reflective blue glass
+
+            const buildingMaterials = [bConcrete, bPlaster, bSlate, bGlass, bConcrete, bSlate]; // Weighting concrete
+            
+            const bGeoBase = new THREE.BoxGeometry(1, 1, 1);
+            const buildingGroup = new THREE.Group();
+
+            for(let x = -CITY_SIZE/2; x < CITY_SIZE/2; x++) {
+                for(let z = -CITY_SIZE/2; z < CITY_SIZE/2; z++) {
+                    if (Math.abs(x) < 1 && Math.abs(z) < 1) continue; 
+                    if (Math.random() < 0.12) continue; // Parks / empty plots
+                    
+                    let wx = x * BLOCK_SIZE + BLOCK_SIZE/2;
+                    let wz = z * BLOCK_SIZE + BLOCK_SIZE/2;
+                    
+                    let height = 40 + Math.random() * 260; // Huge variants for skyline
+                    if (Math.abs(x) < 6 && Math.abs(z) < 6) height += 180; // Financial district center
+
+                    let width = BLOCK_SIZE - ROAD_WIDTH;
+                    
+                    const randMat = buildingMaterials[Math.floor(Math.random() * buildingMaterials.length)];
+                    const b = new THREE.Mesh(bGeoBase, randMat);
+                    b.scale.set(width, height, width);
+                    b.position.set(wx, height/2, wz);
+                    b.castShadow = true;
+                    b.receiveShadow = true;
+                    buildingGroup.add(b);
+                }
+            }
+            scene.add(buildingGroup);
+
+            // --- REFINED REALISTIC CAR MESH (Metallic Paint) ---
+            const carGroup = new THREE.Group();
+            
+            // High gloss beautiful red metallic paint
+            const carPaint = new THREE.MeshPhysicalMaterial({ 
+                color: 0xb91c1c, 
+                metalness: 0.6, 
+                roughness: 0.3,
+                clearcoat: 1.0,
+                clearcoatRoughness: 0.1
+            });
+            const chassis = new THREE.Mesh(new THREE.BoxGeometry(4.8, 0.8, 2.0), carPaint);
+            chassis.position.y = 0.6;
+            chassis.castShadow = true;
+            carGroup.add(chassis);
+            
+            const roof = new THREE.Mesh(new THREE.BoxGeometry(2.2, 0.6, 1.8), new THREE.MeshStandardMaterial({ color: 0x111111, roughness: 0.5 }));
+            roof.position.set(-0.2, 1.3, 0);
+            roof.castShadow = true;
+            carGroup.add(roof);
+
+            const wMat = new THREE.MeshStandardMaterial({color: 0x010101, roughness: 0.9, metalness: 0.0});
+            const wGeo = new THREE.CylinderGeometry(0.5, 0.5, 0.4, 20);
+            wGeo.rotateX(Math.PI/2);
+            [ [1.5, 0.5, 1.1], [1.5, 0.5, -1.1], [-1.5, 0.5, 1.1], [-1.5, 0.5, -1.1] ].forEach(p => {
+                 let w = new THREE.Mesh(wGeo, wMat);
+                 w.position.set(p[0], p[1], p[2]);
+                 w.castShadow = true;
+                 carGroup.add(w);
+            });
+
+            const iconGeo = new THREE.ConeGeometry(15, 30, 4);
+            iconGeo.rotateZ(-Math.PI / 2); 
+            const mapIcon = new THREE.Mesh(iconGeo, new THREE.MeshBasicMaterial({ color: 0xe11d48, depthTest: false }));
+            mapIcon.position.y = 120; 
+            mapIcon.layers.set(1); 
+            carGroup.add(mapIcon);
+
+            scene.add(carGroup);
+
+            // --- TRUE ROAD INTERSECTION AI LOGIC ---
+            class CityPathFinder {
+                findPath(startW, endW) {
+                    let startIx = Math.round(startW.x / BLOCK_SIZE);
+                    let startIz = Math.round(startW.z / BLOCK_SIZE);
+                    let endIx = Math.round(endW.x / BLOCK_SIZE);
+                    let endIz = Math.round(endW.z / BLOCK_SIZE);
+                    
+                    let limit = Math.floor(CITY_SIZE / 2);
+                    endIx = Math.max(-limit, Math.min(limit, endIx));
+                    endIz = Math.max(-limit, Math.min(limit, endIz));
+
+                    let open = [{x: startIx, z: startIz, g: 0, f: 0, p: null}];
+                    let closed = new Set();
+                    let gMap = new Map();
+                    
+                    let best = null;
+                    let iters = 0;
+                    
+                    while (open.length > 0 && iters < 8000) {
+                        iters++;
+                        let idx = 0;
+                        for (let i=1; i<open.length; i++) if(open[i].f < open[idx].f) idx=i;
+                        let curr = open.splice(idx, 1)[0];
+                        best = curr;
+                        
+                        if (curr.x === endIx && curr.z === endIz) break;
+                        
+                        let key = curr.x + "," + curr.z;
+                        closed.add(key);
+                        
+                        let dirs = [[0,1], [1,0], [0,-1], [-1,0]];
+                        for(let d of dirs) {
+                            let nx = curr.x + d[0];
+                            let nz = curr.z + d[1];
+                            
+                            if (nx < -limit || nx > limit || nz < -limit || nz > limit) continue;
+                            
+                            let nKey = nx + "," + nz;
+                            if (closed.has(nKey)) continue;
+                            
+                            let g = curr.g + 1; 
+                            let ext = gMap.get(nKey);
+                            if (!ext || g < ext.g) {
+                                let f = g + Math.abs(nx - endIx) + Math.abs(nz - endIz); // Perfect Manhattan
+                                let node = {x: nx, z: nz, g: g, f: f, p: curr};
+                                gMap.set(nKey, node);
+                                if (!ext) open.push(node);
+                            }
+                        }
+                    }
+                    
+                    let path = [];
+                    let c = best;
+                    while(c) {
+                        path.push(new THREE.Vector3(c.x * BLOCK_SIZE, 0, c.z * BLOCK_SIZE));
+                        c = c.p;
+                    }
+                    path.reverse();
+                    return path;
+                }
+            }
+
+            const navMesh = new CityPathFinder();
+            document.getElementById('nav-status').innerText = 'MATHEMATICAL CITY GRID NAV RUNNING.';
+
+            // --- PHYSICS STATE ---
+            let env = { weather: 'Dry', mu: 1.0, gravity: 9.81 };
+            
+            let carState = {
+                x: 0, z: 0, h: 0, vFwd: 0, vRight: 0,
+                mass: 1500, wheelbase: 2.8, targetSpeedKmh: 60,
+                maxSteer: Math.PI / 3.0, maxThrust: 14000, maxBraking: 35000,
+                width: 2.0, length: 4.8
+            };
+
+            let viewMode = 'FPV'; 
+
+            let waypoints = []; 
+            let wpFinalMesh = null; 
+            let pathLineMesh = null; 
+            let skidmarks = [];
+            let prevVelocity = {x:0, y:0};
+            let telemetry = { vel: 0, slip: 0, gforce: 0, safe: 0 };
+            let lastTime = performance.now();
+
+            window.changeSpeed = (delta) => {
+                carState.targetSpeedKmh = Math.max(0, carState.targetSpeedKmh + delta);
+                document.getElementById('ctrl-speed').innerText = carState.targetSpeedKmh + ' km/h';
+            };
+            window.setSpeed = (val) => {
+                carState.targetSpeedKmh = val;
+                document.getElementById('ctrl-speed').innerText = carState.targetSpeedKmh + ' km/h';
+            };
+
+            window.toggleCameraMode = () => {
+                if (viewMode === 'Chase') {
+                    viewMode = 'FPV';
+                    document.getElementById('btn-cam').innerText = 'SWITCH TO ORBIT CAM';
+                    controls.enabled = false;
+                } else if (viewMode === 'FPV') {
+                    viewMode = 'Orbit';
+                    document.getElementById('btn-cam').innerText = 'SWITCH TO CHASE CAM';
+                    controls.enabled = true;
+                    camera.position.copy(carGroup.position).add(new THREE.Vector3(30, 20, 30));
+                } else {
+                    viewMode = 'Chase';
+                    document.getElementById('btn-cam').innerText = 'SWITCH TO FPV';
+                    controls.enabled = false;
+                }
+            };
+
+            const raycaster = new THREE.Raycaster();
+            const mouse = new THREE.Vector2();
+
+            window.addEventListener('mousedown', (e) => {
+                const mapSize = 250;
+                const borderPadding = 25;
+                const mapLeft = window.innerWidth - mapSize - borderPadding;
+                const mapTop = borderPadding;
+                
+                // Check if the click falls inside the Satellite UI Minimap!
+                if (e.clientX >= mapLeft && e.clientX <= mapLeft + mapSize && e.clientY >= mapTop && e.clientY <= mapTop + mapSize) {
+                    let localX = e.clientX - mapLeft;
+                    let localY = e.clientY - mapTop;
+                    let mX = (localX / mapSize) * 2 - 1;
+                    let mY = -(localY / mapSize) * 2 + 1; 
+                    
+                    let targetX = carGroup.position.x + (mX * mapAreaRadius);
+                    let targetZ = carGroup.position.z - (mY * mapAreaRadius);
+                    let pt = new THREE.Vector3(targetX, 0, targetZ);
+                    processNavigationTarget(pt);
+                } else if (e.clientX >= 380) {
+                    // Regular raycast for interactive 3D scene targeting
+                    mouse.x = (e.clientX / window.innerWidth) * 2 - 1;
+                    mouse.y = -(e.clientY / window.innerHeight) * 2 + 1;
+                    raycaster.setFromCamera(mouse, camera);
+                    const intersects = raycaster.intersectObjects([ground, ...buildingGroup.children]);
+                    if (intersects.length > 0) {
+                        processNavigationTarget(intersects[0].point);
+                    }
+                }
+            });
+
+            function spawnSkidmark(offsetZ) {
+                let offX = -carState.length * 0.4;
+                let offRot = carGroup.rotation.y;
+                
+                let worldX = carState.x + Math.cos(offRot)*offX - Math.sin(offRot)*offsetZ;
+                let worldZ = carState.z - Math.sin(offRot)*offX - Math.cos(offRot)*offsetZ;
+                
+                const smGeo = new THREE.PlaneGeometry(1.2, 1.2);
+                const smMat = new THREE.MeshBasicMaterial({color: 0x1a1c20, transparent: true, opacity: 0.6});
+                const sm = new THREE.Mesh(smGeo, smMat);
+                sm.rotation.x = -Math.PI / 2;
+                sm.rotation.z = carGroup.rotation.y;
+                sm.position.set(worldX, 0.1, worldZ); // slightly above ground to prevent z-fighting with lanes
+                scene.add(sm);
+                skidmarks.push({mesh: sm, life: 1.0});
+            }
+
+            function updatePhysics(dt) {
+                let target = waypoints[0];
+                let steerAngle = 0;
+                let throttleForce = 0;
+                let targetSpeedMps = carState.targetSpeedKmh / 3.6;
+
+                if (target) {
+                    let dx = target.x - carState.x;
+                    let dz = target.z - carState.z;
+                    let dist = Math.hypot(dx, dz);
+
+                    if (dist < 35.0) { 
+                        waypoints.shift();
+                        target = waypoints[0];
+                        if(target) { dx = target.x - carState.x; dz = target.z - carState.z; dist = Math.hypot(dx, dz); }
+                    }
+
+                    if (target) {
+                        let angleToTarget = Math.atan2(-dz, dx) - carState.h;
+                        while(angleToTarget > Math.PI) angleToTarget -= 2*Math.PI;
+                        while(angleToTarget < -Math.PI) angleToTarget += 2*Math.PI;
+
+                        steerAngle = Math.max(-carState.maxSteer, Math.min(carState.maxSteer, angleToTarget));
+
+                        let turnRadius = dist / Math.max(0.01, 2 * Math.sin(Math.abs(angleToTarget)));
+                        let safeSpeedMps = Math.sqrt(env.mu * env.gravity * Math.abs(turnRadius));
+
+                        let totalDist = dist;
+                        for(let i=1; i<waypoints.length; i++) totalDist += Math.hypot(waypoints[i].x - waypoints[i-1].x, waypoints[i].z - waypoints[i-1].z);
+                        document.getElementById('wp-dist').innerText = Math.round(totalDist) + ' m';
+
+                        let stoppingDist = (carState.vFwd * carState.vFwd) / (2 * env.mu * env.gravity);
+                        let upcomingSharpTurn = waypoints.length > 1 && Math.abs(angleToTarget) > 0.4;
+
+                        if (carState.vFwd < targetSpeedMps && totalDist > stoppingDist * 1.5) {
+                            throttleForce = carState.maxThrust;
+                        } else if (totalDist < stoppingDist * 1.5) { 
+                            throttleForce = -carState.maxBraking * 0.5; 
+                        } else { 
+                            if (carState.vFwd > safeSpeedMps || upcomingSharpTurn) throttleForce = -carState.maxBraking * 0.8;
+                            else throttleForce = carState.maxThrust; 
+                        }
+                    }
+                } else {
+                    document.getElementById('wp-dist').innerText = '0 m';
+                    if (carState.vFwd > 0.5) throttleForce = -carState.maxBraking;
+                    else if (carState.vFwd < -0.5) throttleForce = carState.maxBraking;
+                    else carState.vFwd = 0;
+                    
+                    if (wpFinalMesh) { scene.remove(wpFinalMesh); wpFinalMesh = null; }
+                    if (pathLineMesh) { scene.remove(pathLineMesh); pathLineMesh = null; }
+                }
+
+                carState.vFwd += (throttleForce / carState.mass) * dt;
+                if(carState.vFwd < 0 && !target && carState.targetSpeedKmh === 0) carState.vFwd = 0; 
+                
+                let maxLatGripForce = env.mu * carState.mass * env.gravity;
+                let reqLatForce = -carState.vRight * carState.mass * 12.0; 
+                
+                let actualLatForce = reqLatForce;
+                if (Math.abs(actualLatForce) > maxLatGripForce) {
+                    actualLatForce = Math.sign(actualLatForce) * maxLatGripForce;
+                    if (Math.hypot(carState.vFwd, carState.vRight) > 2.0) {
+                        spawnSkidmark(carState.width * 0.45); 
+                        spawnSkidmark(-carState.width * 0.45); 
+                    }
+                }
+
+                carState.vRight += (actualLatForce / carState.mass) * dt;
+                if (carState.vFwd !== 0) carState.h += (carState.vFwd / carState.wheelbase) * Math.tan(steerAngle) * dt;
+
+                let cosH = Math.cos(carState.h);
+                let sinH = Math.sin(carState.h);
+                
+                let worldVx = carState.vFwd * cosH - carState.vRight * sinH;
+                let worldVz = -(carState.vFwd * sinH + carState.vRight * cosH);
+
+                let ax = (worldVx - prevVelocity.x) / dt;
+                let ay = (worldVz - prevVelocity.y) / dt;
+                telemetry.gforce = Math.hypot(ax, ay) / env.gravity;
+                if(isNaN(telemetry.gforce)) telemetry.gforce = 0;
+                prevVelocity = {x: worldVx, y: worldVz};
+
+                carState.x += worldVx * dt;
+                carState.z += worldVz * dt;
+
+                carGroup.position.set(carState.x, 0, carState.z);
+                carGroup.rotation.y = carState.h; 
+
+                telemetry.slip = Math.abs(carState.vFwd) > 1 ? Math.abs(Math.atan2(carState.vRight, carState.vFwd) * 180 / Math.PI) : 0;
+                telemetry.vel = Math.hypot(worldVx, worldVz) * 3.6;
+            }
+
+            // --- RENDER LOOP ---
+            function loop(timestamp) {
+                try {
+                    let dt = (timestamp - lastTime) / 1000;
+                    if (dt > 0.1) dt = 0.1; 
+                    lastTime = timestamp;
+
+                    updatePhysics(dt);
+
+                    if (viewMode === 'Chase') {
+                        let offsetBase = new THREE.Vector3(-25, 12, 0); 
+                        offsetBase.applyAxisAngle(new THREE.Vector3(0,1,0), carState.h); 
+                        offsetBase.add(carGroup.position);
+                        camera.position.lerp(offsetBase, 4.0 * dt);
+                        
+                        let targetFwd = new THREE.Vector3(15, 2, 0);
+                        targetFwd.applyAxisAngle(new THREE.Vector3(0,1,0), carState.h).add(carGroup.position);
+                        camera.lookAt(targetFwd);
+                    } else if (viewMode === 'FPV') {
+                        let fpvOffset = new THREE.Vector3(0.5, 1.4, 0); 
+                        fpvOffset.applyAxisAngle(new THREE.Vector3(0,1,0), carState.h);
+                        camera.position.copy(carGroup.position).add(fpvOffset);
+                        
+                        let lookFwd = new THREE.Vector3(20, 1.4, 0);
+                        lookFwd.applyAxisAngle(new THREE.Vector3(0,1,0), carState.h).add(carGroup.position);
+                        camera.lookAt(lookFwd);
+                    } else if (viewMode === 'Orbit') {
+                        controls.target.copy(carGroup.position);
+                        controls.update(); 
+                    }
+
+                    for(let i=skidmarks.length-1; i>=0; i--) {
+                        let sm = skidmarks[i];
+                        sm.life -= dt * 0.1;
+                        sm.mesh.material.opacity = sm.life;
+                        if(sm.life <= 0) {
+                            scene.remove(sm.mesh);
+                            sm.mesh.geometry.dispose();
+                            sm.mesh.material.dispose();
+                            skidmarks.splice(i, 1);
+                        }
+                    }
+
+                    document.getElementById('tel-vel').innerText = telemetry.vel.toFixed(1) + ' km/h';
+                    let slipEl = document.getElementById('tel-slip');
+                    slipEl.innerText = telemetry.slip.toFixed(1) + '°';
+                    slipEl.className = telemetry.slip > 12 ? 'stat-value danger' : (telemetry.slip > 5 ? 'stat-value warn' : 'stat-value safe');
+                    document.getElementById('tel-gforce').innerText = telemetry.gforce.toFixed(2) + ' G';
+                    
+                    renderer.clear();
+
+                    renderer.setViewport(0, 0, window.innerWidth, window.innerHeight);
+                    renderer.setScissor(0, 0, window.innerWidth, window.innerHeight);
+                    renderer.setScissorTest(false);
+                    renderer.render(scene, camera);
+
+                    const mapSize = 250;
+                    const borderPadding = 25;
+                    const mX = window.innerWidth - mapSize - borderPadding;
+                    const mY = window.innerHeight - mapSize - borderPadding;
+                    
+                    renderer.setViewport(mX, mY, mapSize, mapSize);
+                    renderer.setScissor(mX, mY, mapSize, mapSize);
+                    renderer.setScissorTest(true);
+                    
+                    miniCam.position.x = carGroup.position.x;
+                    miniCam.position.z = carGroup.position.z;
+                    miniCam.lookAt(carGroup.position.x, 0, carGroup.position.z);
+                    
+                    renderer.clearDepth(); 
+                    renderer.render(scene, miniCam);
+
+                } catch (e) {
+                    console.error(e);
+                    document.getElementById('error-log').style.display = 'block';
+                    document.getElementById('error-log').innerText = "LOOP ERROR: " + e.message;
+                }
+                
+                requestAnimationFrame(loop);
+            }
+
+            window.addEventListener('resize', () => {
+                camera.aspect = window.innerWidth / window.innerHeight;
+                camera.updateProjectionMatrix();
+                renderer.setSize(window.innerWidth, window.innerHeight);
+            });
+
+            setTimeout(() => {
+                window.toggleCameraMode(); // Init FPV Automatically
+            }, 800);
+
+            requestAnimationFrame(loop);
+            
+        } catch (e) {
+            document.getElementById('error-log').style.display = 'block';
+            document.getElementById('error-log').innerText = "FATAL SETUP ERROR: " + e.message;
+        }
+    </script>
+</body>
+</html>

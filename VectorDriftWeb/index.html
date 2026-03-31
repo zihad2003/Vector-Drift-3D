@@ -1,0 +1,436 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <title>Vector Drift: The Autonomous Navigator</title>
+    <style>
+        body { margin: 0; padding: 0; background: #0f1319; color: #fff; font-family: 'Inter', -apple-system, BlinkMacSystemFont, sans-serif; overflow: hidden; }
+        canvas { display: block; }
+        
+        #ui { position: absolute; top: 0; left: 0; width: 380px; height: 100vh; background: rgba(10, 14, 23, 0.95); border-right: 1px solid rgba(255, 255, 255, 0.08); padding: 30px; box-sizing: border-box; display: flex; flex-direction: column; gap: 24px; box-shadow: 10px 0 30px rgba(0,0,0,0.5); z-index: 10; backdrop-filter: blur(10px);}
+        h1 { margin: 0; font-size: 26px; font-weight: 800; letter-spacing: 1px; color: #00e5ff; text-transform: uppercase; text-shadow: 0 0 15px rgba(0, 229, 255, 0.4); }
+        .subtitle { font-size: 13px; color: #818cf8; margin-top: -20px; font-weight: 600; text-transform: uppercase; letter-spacing: 2px;}
+        
+        .panel { background: rgba(255,255,255,0.03); padding: 20px; border-radius: 12px; border: 1px solid rgba(255,255,255,0.06); transition: all 0.3s ease; }
+        .panel:hover { border-color: rgba(0, 229, 255, 0.2); }
+        .panel-title { font-size: 11px; text-transform: uppercase; color: #64748b; font-weight: 800; margin-bottom: 15px; letter-spacing: 1.5px; display: flex; align-items: center;}
+        .panel-title::after { content: ''; flex: 1; height: 1px; background: rgba(255,255,255,0.06); margin-left: 10px;}
+        
+        .stat-row { display: flex; justify-content: space-between; margin-bottom: 10px; font-family: 'SF Mono', Consolas, monospace; font-size: 14px;}
+        .stat-label { color: #94a3b8; }
+        .stat-value { color: #f8fafc; font-weight: 600; text-shadow: 0 0 10px rgba(255,255,255,0.2); }
+        
+        /* Dynamic Status Colors */
+        .stat-value.danger { color: #fb7185; text-shadow: 0 0 10px rgba(251, 113, 133, 0.4); }
+        .stat-value.safe { color: #34d399; text-shadow: 0 0 10px rgba(52, 211, 153, 0.4); }
+        .stat-value.warn { color: #fbbf24; text-shadow: 0 0 10px rgba(251, 191, 36, 0.4); }
+        
+        button { background: rgba(255,255,255,0.05); color: #e2e8f0; border: 1px solid rgba(255,255,255,0.1); padding: 12px; border-radius: 6px; cursor: pointer; transition: all 0.2s cubic-bezier(0.4, 0, 0.2, 1); font-family: inherit; font-weight: 600; text-transform: uppercase; font-size: 12px; margin-bottom: 8px; width: 100%; letter-spacing: 0.5px;}
+        button:hover { background: rgba(0, 229, 255, 0.1); color: #00e5ff; border-color: rgba(0, 229, 255, 0.4); box-shadow: 0 0 15px rgba(0, 229, 255, 0.1); }
+        button.danger-btn { background: rgba(251, 113, 133, 0.1); color: #fb7185; border-color: rgba(251, 113, 133, 0.2); }
+        button.danger-btn:hover { background: #fb7185; color: #fff; border-color: #fb7185; box-shadow: 0 0 15px rgba(251, 113, 133, 0.4); }
+        button:active { transform: scale(0.97); }
+        
+        .btn-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; }
+        
+        #instructions { position: absolute; bottom: 30px; left: 410px; color: #94a3b8; background: rgba(15, 23, 42, 0.8); padding: 20px 25px; border-radius: 12px; pointer-events: none; backdrop-filter: blur(5px); border: 1px solid rgba(255,255,255,0.05); box-shadow: 0 10px 30px rgba(0,0,0,0.3); max-width: 400px; line-height: 1.6;}
+        #instructions strong { color: #38bdf8; font-size: 14px; letter-spacing: 1px; display: block; margin-bottom: 5px;}
+        
+        #wp-list { font-size: 12px; color: #64748b; max-height: 120px; overflow-y: auto; font-family: monospace; display: flex; flex-direction: column; gap: 4px;}
+        .wp-item { background: rgba(0,0,0,0.2); padding: 4px 8px; border-radius: 4px; border-left: 2px solid #38bdf8;}
+    </style>
+</head>
+<body>
+    <div id="ui">
+        <h1>Vector Drift</h1>
+        <p class="subtitle">Autonomous Navigator</p>
+        
+        <div class="panel">
+            <div class="panel-title">Live Telemetry</div>
+            <div class="stat-row"><span class="stat-label">Velocity</span><span id="tel-vel" class="stat-value">0.0 km/h</span></div>
+            <div class="stat-row"><span class="stat-label">Slip Angle</span><span id="tel-slip" class="stat-value">0.0°</span></div>
+            <div class="stat-row"><span class="stat-label">Lat G-Force</span><span id="tel-gforce" class="stat-value">0.00 G</span></div>
+            <div class="stat-row" style="margin-top: 15px; padding-top: 15px; border-top: 1px dashed rgba(255,255,255,0.1);"><span class="stat-label" style="color: #cbd5e1;">Safe Entry SPD</span><span id="tel-safe" class="stat-value safe">N/A</span></div>
+        </div>
+
+        <div class="panel">
+            <div class="panel-title">Mission Control</div>
+            <div class="stat-row"><span class="stat-label">Requested Speed</span><span id="ctrl-speed" class="stat-value save">60 km/h</span></div>
+            <div class="btn-grid">
+                <button onclick="changeSpeed(20)">Speed Up (+20)</button>
+                <button onclick="changeSpeed(-20)">Slow Down (-20)</button>
+            </div>
+            <button onclick="setSpeed(0)" class="danger-btn" style="margin-top: 5px;">Emergency Brake</button>
+        </div>
+
+        <div class="panel">
+            <div class="panel-title">Physics Variables</div>
+            <div class="stat-row"><span class="stat-label">Weather System</span><span id="env-weather" class="stat-value">Dry Asphalt</span></div>
+            <div class="stat-row"><span class="stat-label">Tire Friction (&mu;)</span><span id="env-mu" class="stat-value">1.00</span></div>
+            <button onclick="toggleWeather()" style="margin-top: 10px;">Simulate Rain Event</button>
+        </div>
+        
+        <div class="panel" style="flex: 1;">
+            <div class="panel-title">Waypoints Queue (<span id="wp-count">0</span>)</div>
+            <div id="wp-list"></div>
+        </div>
+    </div>
+    
+    <div id="instructions">
+        <strong>CONTROLS:</strong>
+        <span style="color: #cbd5e1;">• Click anywhere on the map to place Waypoints.<br>
+        • The Autonomous Driver handles steering & throttle.<br>
+        • Queue Speed commands. If the AI enters a sharp turn too fast, it will drift or crash according to physical constraints.</span>
+    </div>
+
+    <canvas id="gameCanvas"></canvas>
+
+    <script>
+        const canvas = document.getElementById('gameCanvas');
+        const ctx = canvas.getContext('2d');
+        
+        function resize() {
+            canvas.width = window.innerWidth;
+            canvas.height = window.innerHeight;
+        }
+        window.addEventListener('resize', resize);
+        resize();
+
+        // High-Fidelity Physics Variables (The "Real-Life Static")
+        let env = {
+            weather: 'Dry',
+            mu: 1.0, 
+            gravity: 9.81
+        };
+
+        const PIXEL_METER_RATIO = 2.0; // 1 meter = 2 pixels for simulation scale
+        
+        let car = {
+            x: window.innerWidth / 2 + 190,
+            y: window.innerHeight / 2,
+            h: -Math.PI/2, // heading
+            vFwd: 0,       // velocity forward (m/s)
+            vRight: 0,     // velocity right (lateral slip) (m/s)
+            mass: 1500,    // kg
+            wheelbase: 2.8 * PIXEL_METER_RATIO,
+            targetSpeedKmh: 60,
+            maxSteer: Math.PI / 4.5, 
+            maxThrust: 12000, // Newtons
+            maxBraking: 28000, 
+            width: 2.1 * PIXEL_METER_RATIO,
+            length: 4.8 * PIXEL_METER_RATIO
+        };
+
+        let waypoints = [];
+        let skidmarks = [];
+        
+        let lastTime = performance.now();
+        let telemetry = { vel: 0, slip: 0, gforce: 0, safe: 0 };
+        let prevVelocity = {x: 0, y: 0};
+
+        // --- COMMAND BUFFER UI ---
+        function changeSpeed(delta) {
+            car.targetSpeedKmh = Math.max(0, car.targetSpeedKmh + delta);
+            document.getElementById('ctrl-speed').innerText = car.targetSpeedKmh + ' km/h';
+        }
+        function setSpeed(val) {
+            car.targetSpeedKmh = val;
+            document.getElementById('ctrl-speed').innerText = car.targetSpeedKmh + ' km/h';
+        }
+        function toggleWeather() {
+            if (env.weather === 'Dry') {
+                env.weather = 'Rain';
+                env.mu = 0.45; // 40-50% grip drop
+                document.getElementById('env-weather').innerText = 'Heavy Rain';
+                document.getElementById('env-weather').style.color = '#38bdf8';
+            } else {
+                env.weather = 'Dry';
+                env.mu = 1.0;
+                document.getElementById('env-weather').innerText = 'Dry Asphalt';
+                document.getElementById('env-weather').style.color = '#fff';
+            }
+            document.getElementById('env-mu').innerText = env.mu.toFixed(2);
+        }
+
+        // Add waypoints
+        canvas.addEventListener('mousedown', (e) => {
+            if (e.clientX < 380) return; // ignore UI clicks
+            waypoints.push({x: e.clientX, y: e.clientY});
+            updateWaypointUI();
+        });
+
+        function updateWaypointUI() {
+            document.getElementById('wp-count').innerText = waypoints.length;
+            let ht = '';
+            waypoints.forEach((w, i) => { 
+                ht += `<div class="wp-item">SEQ_${i+1} : P(${Math.round(w.x)}, ${Math.round(w.y)})</div>`; 
+            });
+            document.getElementById('wp-list').innerHTML = ht;
+        }
+
+        function drawEnvironment() {
+            ctx.fillStyle = env.weather === 'Rain' ? '#0a0e14' : '#10141b';
+            ctx.fillRect(380, 0, canvas.width - 380, canvas.height);
+            
+            // Grid
+            ctx.strokeStyle = env.weather === 'Rain' ? 'rgba(255,255,255,0.02)' : 'rgba(255,255,255,0.04)';
+            ctx.lineWidth = 1;
+            for(let x=400; x<canvas.width; x+=100) { ctx.beginPath(); ctx.moveTo(x,0); ctx.lineTo(x,canvas.height); ctx.stroke(); }
+            for(let y=0; y<canvas.height; y+=100) { ctx.beginPath(); ctx.moveTo(380,y); ctx.lineTo(canvas.width,y); ctx.stroke(); }
+        }
+
+        function updatePhysics(dt) {
+            let target = waypoints[0];
+            let steerAngle = 0;
+            let throttleForce = 0;
+
+            let targetSpeedMps = car.targetSpeedKmh / 3.6;
+
+            // AUTONOMOUS NAVIGATOR LOGIC
+            if (target) {
+                let dx = target.x - car.x;
+                let dy = target.y - car.y;
+                let dist = Math.hypot(dx, dy);
+
+                // Waypoint reached
+                if (dist < 40) {
+                    waypoints.shift();
+                    updateWaypointUI();
+                    target = waypoints[0];
+                    if(target) { dx = target.x - car.x; dy = target.y - car.y; dist = Math.hypot(dx, dy); }
+                }
+
+                if (target) {
+                    // Steering Calc
+                    let angleToTarget = Math.atan2(dy, dx) - car.h;
+                    while(angleToTarget > Math.PI) angleToTarget -= 2*Math.PI;
+                    while(angleToTarget < -Math.PI) angleToTarget += 2*Math.PI;
+
+                    steerAngle = Math.max(-car.maxSteer, Math.min(car.maxSteer, angleToTarget));
+
+                    // Telemetry Safe Entry Speed: v = sqrt(mu * g * r)
+                    let turnRadius = (dist / PIXEL_METER_RATIO) / Math.max(0.01, 2 * Math.sin(Math.abs(angleToTarget)));
+                    let safeSpeedMps = Math.sqrt(env.mu * env.gravity * turnRadius);
+                    telemetry.safe = safeSpeedMps * 3.6;
+
+                    // AI Inertia & Braking Calculation
+                    let stoppingDist = (car.vFwd * car.vFwd) / (2 * env.mu * env.gravity);
+                    
+                    if (car.vFwd < targetSpeedMps && (dist / PIXEL_METER_RATIO) > stoppingDist * 1.05) {
+                        throttleForce = car.maxThrust;
+                    } else {
+                        // AI Brakes at the last possible safe physical limit
+                        throttleForce = -car.maxBraking;
+                    }
+                }
+            } else {
+                telemetry.safe = 0;
+                // No waypoint -> Stop
+                if (car.vFwd > 0.5) throttleForce = -car.maxBraking;
+                else if (car.vFwd < -0.5) throttleForce = car.maxBraking;
+                else car.vFwd = 0;
+            }
+
+            // Apply Engine Force
+            car.vFwd += (throttleForce / car.mass) * dt;
+            if(car.vFwd < 0 && !target && car.targetSpeedKmh === 0) car.vFwd = 0; 
+            
+            // THE CONSTRAINT: Tire Grip
+            let maxLatGripForce = env.mu * car.mass * env.gravity; // F = mu * N
+            
+            // Required force to prevent drifting
+            let reqLatForce = -car.vRight * car.mass * 8.0; // Stiff factor
+            
+            let actualLatForce = reqLatForce;
+            
+            // IF REQUIREMENT EXCEEDS GRIP -> CAR DRIFTS
+            if (Math.abs(actualLatForce) > maxLatGripForce) {
+                actualLatForce = Math.sign(actualLatForce) * maxLatGripForce;
+                
+                // Spawn Skidmarks
+                if (Math.hypot(car.vFwd, car.vRight) > 2.0) {
+                    let offRot = car.h + (Math.random()*0.1 - 0.05);
+                    let backX1 = car.x - Math.cos(offRot) * (car.length * 0.4) + Math.sin(offRot) * (car.width * 0.35);
+                    let backY1 = car.y - Math.sin(offRot) * (car.length * 0.4) - Math.cos(offRot) * (car.width * 0.35);
+                    let backX2 = car.x - Math.cos(offRot) * (car.length * 0.4) - Math.sin(offRot) * (car.width * 0.35);
+                    let backY2 = car.y - Math.sin(offRot) * (car.length * 0.4) + Math.cos(offRot) * (car.width * 0.35);
+                    
+                    skidmarks.push({x: backX1, y: backY1, a: 0.8});
+                    skidmarks.push({x: backX2, y: backY2, a: 0.8});
+                }
+            }
+
+            // Apply lateral acceleration
+            car.vRight += (actualLatForce / car.mass) * dt;
+
+            // Convert local velocity to world space
+            let worldVx = car.vFwd * Math.cos(car.h) - car.vRight * Math.sin(car.h);
+            let worldVy = car.vFwd * Math.sin(car.h) + car.vRight * Math.cos(car.h);
+
+            // Calculate G-Force
+            let ax = (worldVx - prevVelocity.x) / dt;
+            let ay = (worldVy - prevVelocity.y) / dt;
+            telemetry.gforce = Math.hypot(ax, ay) / env.gravity;
+            if(isNaN(telemetry.gforce)) telemetry.gforce = 0;
+            prevVelocity = {x: worldVx, y: worldVy};
+
+            // Move the car (scaled for visibility on screen)
+            let visualScale = PIXEL_METER_RATIO * 4.0;
+            car.x += worldVx * visualScale * dt;
+            car.y += worldVy * visualScale * dt;
+
+            // Rotation (Bicycle model)
+            if (car.vFwd !== 0) {
+                car.h += (car.vFwd / (car.wheelbase / PIXEL_METER_RATIO)) * Math.tan(steerAngle) * dt;
+            }
+
+            // Populate Telemetry Data
+            telemetry.vel = Math.hypot(worldVx, worldVy) * 3.6;
+            if (Math.abs(car.vFwd) > 1) {
+                telemetry.slip = Math.abs(Math.atan2(car.vRight, car.vFwd) * 180 / Math.PI);
+            } else { telemetry.slip = 0; }
+            
+            return steerAngle;
+        }
+
+        function render(steerAngle, dt) {
+            ctx.clearRect(0, 0, canvas.width, canvas.height);
+            drawEnvironment();
+
+            // Render Skidmarks
+            skidmarks.forEach(sm => {
+                ctx.fillStyle = `rgba(0,0,0,${sm.a})`;
+                ctx.beginPath();
+                ctx.arc(sm.x, sm.y, 3, 0, Math.PI*2);
+                ctx.fill();
+            });
+            // Fade skidmarks
+            for(let i=skidmarks.length-1; i>=0; i--) {
+                skidmarks[i].a -= dt * 0.15;
+                if(skidmarks[i].a <= 0) skidmarks.splice(i, 1);
+            }
+
+            // Render Waypoints & Paths
+            waypoints.forEach((w, i) => {
+                ctx.strokeStyle = i === 0 ? '#00e5ff' : 'rgba(255,255,255,0.2)';
+                ctx.lineWidth = i === 0 ? 2 : 1;
+                ctx.beginPath();
+                ctx.arc(w.x, w.y, i === 0 ? 12 : 8, 0, Math.PI*2);
+                ctx.stroke();
+                
+                // Outer pulse for active
+                if(i === 0) {
+                    ctx.fillStyle = 'rgba(0, 229, 255, 0.4)';
+                    ctx.beginPath(); ctx.arc(w.x, w.y, 4, 0, Math.PI*2); ctx.fill();
+                    
+                    // Draw trajectory
+                    ctx.strokeStyle = 'rgba(0, 229, 255, 0.15)';
+                    ctx.setLineDash([6, 6]);
+                    ctx.beginPath();
+                    ctx.moveTo(car.x, car.y);
+                    ctx.lineTo(w.x, w.y);
+                    ctx.stroke();
+                    ctx.setLineDash([]);
+                }
+            });
+
+            // Render Car
+            ctx.save();
+            ctx.translate(car.x, car.y);
+            ctx.rotate(car.h);
+            
+            // Chassis
+            ctx.fillStyle = telemetry.slip > 15 ? '#fb7185' : '#38bdf8'; // turns red when drifting hard
+            if(env.weather === 'Rain') ctx.shadowColor = 'rgba(0,0,0,0)';
+            else ctx.shadowColor = ctx.fillStyle;
+            ctx.shadowBlur = 10;
+            ctx.fillRect(-car.length/2, -car.width/2, car.length, car.width);
+            
+            // Roof / Windshield detail
+            ctx.fillStyle = 'rgba(0,0,0,0.6)';
+            ctx.shadowBlur = 0;
+            ctx.fillRect(-car.length/6, -car.width/2 + 1, car.length/2, car.width - 2);
+            
+            // Headlights
+            ctx.fillStyle = '#fff';
+            ctx.shadowColor = '#fff'; ctx.shadowBlur = 15;
+            ctx.fillRect(car.length/2 - 2, -car.width/2 + 1.5, 3, 3);
+            ctx.fillRect(car.length/2 - 2, car.width/2 - 4.5, 3, 3);
+            
+            // Front Wheels (Steering)
+            ctx.fillStyle = '#111'; ctx.shadowBlur = 0;
+            ctx.save();
+            ctx.translate(car.length/2 - 3, -car.width/2 - 1.5);
+            ctx.rotate(steerAngle);
+            ctx.fillRect(-3, -1.5, 6, 3);
+            ctx.restore();
+            
+            ctx.save();
+            ctx.translate(car.length/2 - 3, car.width/2 + 1.5);
+            ctx.rotate(steerAngle);
+            ctx.fillRect(-3, -1.5, 6, 3);
+            ctx.restore();
+
+            // Rear Wheels
+            ctx.fillRect(-car.length/2 + 2, -car.width/2 - 1.5, 6, 3);
+            ctx.fillRect(-car.length/2 + 2, car.width/2 - 1.5, 6, 3);
+
+            ctx.restore();
+
+            // Visual Rain FX
+            if (env.weather === 'Rain') {
+                ctx.fillStyle = 'rgba(255, 255, 255, 0.05)';
+                for(let k=0; k<80; k++) {
+                    let rx = 380 + Math.random()*(canvas.width-380);
+                    let ry = Math.random()*canvas.height;
+                    ctx.fillRect(rx, ry, 1, 6 + Math.random()*15);
+                }
+            }
+        }
+
+        function updateUI() {
+            document.getElementById('tel-vel').innerText = telemetry.vel.toFixed(1) + ' km/h';
+            
+            let slipEl = document.getElementById('tel-slip');
+            slipEl.innerText = telemetry.slip.toFixed(1) + '°';
+            // highlight slip danger
+            slipEl.className = telemetry.slip > 12 ? 'stat-value danger' : (telemetry.slip > 5 ? 'stat-value warn' : 'stat-value safe');
+            
+            document.getElementById('tel-gforce').innerText = telemetry.gforce.toFixed(2) + ' G';
+            
+            let safeEl = document.getElementById('tel-safe');
+            if(waypoints.length > 0) {
+                safeEl.innerText = telemetry.safe.toFixed(1) + ' km/h';
+                if(telemetry.vel > telemetry.safe + 5) safeEl.className = 'stat-value danger';
+                else if (telemetry.vel > telemetry.safe) safeEl.className = 'stat-value warn';
+                else safeEl.className = 'stat-value safe';
+            } else {
+                safeEl.innerText = 'WAITING FOR NAV';
+                safeEl.className = 'stat-value';
+            }
+        }
+
+        // Main Simulation Loop
+        function loop(timestamp) {
+            let dt = (timestamp - lastTime) / 1000;
+            if (dt > 0.1) dt = 0.1; // framerate cap defense
+            lastTime = timestamp;
+
+            let steerAngle = updatePhysics(dt);
+            render(steerAngle, dt);
+            updateUI();
+
+            requestAnimationFrame(loop);
+        }
+
+        requestAnimationFrame(loop);
+
+        // Pre-fill one waypoint for immediate visual feedback
+        setTimeout(() => {
+            waypoints.push({x: window.innerWidth / 2 + 190, y: 150});
+            updateWaypointUI();
+        }, 1000);
+
+    </script>
+</body>
+</html>
